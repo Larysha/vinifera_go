@@ -28,6 +28,17 @@ for (f in c("annotation.R", "io.R", "enrichment.R", "plots.R")) {
 # ---- Load annotation ONCE, shared across all sessions -----------------------
 ANNOTATION <- load_annotation("data")
 
+# Example dataset for the "Load example" button: a deduped gene list with
+# synthetic log2FC values, so all three modes (ORA, split, GSEA) can be tried.
+EXAMPLE_GENES <- tryCatch(
+  utils::read.csv("data/example_genes.csv", stringsAsFactors = FALSE),
+  error = function(e) NULL
+)
+EXAMPLE_N <- if (is.null(EXAMPLE_GENES)) 0L else nrow(EXAMPLE_GENES)
+
+# GSEA needs a ranked list spanning many genes; warn below this size.
+GSEA_MIN_RECOMMENDED <- 200
+
 GENOME_LABEL <- "T2T v5.1"
 GMT_SOURCE_URL <-
   "https://grapedia.org/wp-content/uploads/2024/07/T2T_5.1_blast2go.zip"
@@ -116,16 +127,53 @@ app_css <- sprintf("
   }
   .nav-tabs .nav-link:hover { color: %1$s !important; }
   a { color: #8a2a57; }
+  /* Greyed-out (unavailable) analysis-mode options */
+  .mode-disabled, .mode-disabled span { color: #adb5bd !important; cursor: not-allowed; }
+  .mode-disabled input { cursor: not-allowed; }
   .form-control:focus, .form-select:focus {
     border-color: %2$s;
     box-shadow: 0 0 0 0.2rem rgba(246, 168, 203, 0.5);
   }
+  /* DataTables pagination: replace the bootswatch teal with the pink / burgundy
+     palette. Bootstrap 5 pagination is driven by CSS variables, so overriding
+     them on .pagination is the reliable way to recolour every state. */
+  .pagination {
+    --bs-pagination-color: %1$s;
+    --bs-pagination-bg: #ffffff;
+    --bs-pagination-border-color: %2$s;
+    --bs-pagination-hover-color: %1$s;
+    --bs-pagination-hover-bg: #f6c6da;
+    --bs-pagination-hover-border-color: %2$s;
+    --bs-pagination-focus-color: %1$s;
+    --bs-pagination-focus-bg: #f6c6da;
+    --bs-pagination-focus-box-shadow: 0 0 0 0.25rem rgba(246, 168, 203, 0.5);
+    --bs-pagination-active-color: %1$s;
+    --bs-pagination-active-bg: %2$s;
+    --bs-pagination-active-border-color: %2$s;
+  }
+  /* Fallback for the non-Bootstrap DataTables pagination markup */
+  .dataTables_wrapper .dataTables_paginate .paginate_button { color: %1$s !important; }
+  .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: #f6c6da !important; color: %1$s !important; border-color: %2$s !important;
+  }
+  .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+  .dataTables_wrapper .dataTables_paginate .paginate_button.current:hover {
+    background: %2$s !important; color: %1$s !important; border-color: %2$s !important;
+  }
 ", GRAPE_BURGUNDY, GRAPE_PINK)
 
 ui <- page_navbar(
-  title = "vinifera_go",
+  title = tags$span(
+    tags$img(src = "favicon.png", height = "30px",
+             style = "margin-right: 8px; vertical-align: middle;"),
+    "vinifera_go"
+  ),
   theme = app_theme,
-  header = tags$head(tags$style(HTML(app_css))),
+  header = tags$head(
+    tags$link(rel = "icon", type = "image/png", href = "favicon.png"),
+    tags$link(rel = "apple-touch-icon", href = "favicon.png"),
+    tags$style(HTML(app_css))
+  ),
   fillable = FALSE,
 
   # ---- Analysis (landing page) ----
@@ -136,8 +184,7 @@ ui <- page_navbar(
         width = 340,
         title = "Inputs",
 
-        fileInput("gene_file", "Gene list (CSV / TSV / text)",
-                  accept = c(".csv", ".tsv", ".txt", ".tab")),
+        uiOutput("gene_file_ui"),
         helpText("One gene per line, or a table with a gene column",
                  "and an optional expression / log2FC column."),
 
@@ -146,6 +193,18 @@ ui <- page_navbar(
                       rows = 4, resize = "vertical"),
         helpText("One gene per line. If anything is pasted here it is used",
                  "in place of an uploaded file."),
+
+        actionButton("clear_all", "Clear all inputs",
+                     class = "btn-outline-danger btn-sm", width = "100%"),
+        helpText("Remove any uploaded file, pasted genes, or example data and",
+                 "start from a fresh slate."),
+
+        actionButton("load_example", "Load example data",
+                     class = "btn-outline-secondary btn-sm",
+                     width = "100%"),
+        helpText(sprintf(paste("A %d-gene list with synthetic log2FC values,",
+                               "for trying out all three analysis modes."),
+                         EXAMPLE_N)),
 
         uiOutput("gene_col_ui"),
         uiOutput("expr_col_ui"),
@@ -157,8 +216,7 @@ ui <- page_navbar(
                      selected = "default"),
         conditionalPanel(
           "input.bg_mode == 'custom'",
-          fileInput("bg_file", "Background gene list",
-                    accept = c(".csv", ".tsv", ".txt", ".tab")),
+          uiOutput("bg_file_ui"),
           helpText("Recommended: upload only the genes that were testable /",
                    "expressed in your experiment.")
         ),
@@ -168,6 +226,7 @@ ui <- page_navbar(
                            selected = c("BP", "MF", "CC")),
 
         uiOutput("mode_ui"),
+        uiOutput("mode_legend"),
 
         actionButton("run", "Run enrichment", class = "btn-primary",
                      width = "100%"),
@@ -268,8 +327,49 @@ ui <- page_navbar(
 # =============================================================================
 server <- function(input, output, session) {
 
-  # ---- Read the gene table from pasted text or an uploaded file -------------
-  # Pasted text takes precedence over a file upload.
+  store <- reactiveValues(example = NULL, reset = 0L)
+
+  # Enrichment output, held in a reactiveVal so the Clear button can blank it.
+  results <- reactiveVal(NULL)
+
+  # File inputs are rendered server-side so the Clear button can reset them
+  # (bumping store$reset rebuilds them empty).
+  output$gene_file_ui <- renderUI({
+    store$reset
+    fileInput("gene_file", "Gene list (CSV / TSV / text)",
+              accept = c(".csv", ".tsv", ".txt", ".tab"))
+  })
+  output$bg_file_ui <- renderUI({
+    store$reset
+    fileInput("bg_file", "Background gene list",
+              accept = c(".csv", ".tsv", ".txt", ".tab"))
+  })
+
+  observeEvent(input$load_example, {
+    if (is.null(EXAMPLE_GENES)) {
+      showNotification("Example dataset is not available.", type = "error")
+      return()
+    }
+    store$example <- EXAMPLE_GENES
+    showNotification(
+      sprintf("Loaded example data: %d genes with synthetic log2FC values.",
+              nrow(EXAMPLE_GENES)),
+      type = "message")
+  })
+
+  # Clear everything: uploaded files, pasted genes, example data, and results.
+  observeEvent(input$clear_all, {
+    store$example <- NULL
+    store$reset <- store$reset + 1L
+    results(NULL)
+    updateTextAreaInput(session, "gene_paste", value = "")
+    updateRadioButtons(session, "bg_mode", selected = "default")
+    showNotification("Cleared all inputs. Ready for a fresh start.",
+                     type = "message")
+  })
+
+  # ---- Resolve the gene table -----------------------------------------------
+  # Precedence: pasted text, then an uploaded file, then the example dataset.
   gene_table <- reactive({
     pasted <- input$gene_paste
     if (!is.null(pasted) && nzchar(trimws(pasted))) {
@@ -280,13 +380,15 @@ server <- function(input, output, session) {
                         NULL
                       }))
     }
-    req(input$gene_file)
-    tryCatch(read_gene_table(input$gene_file$datapath),
-             error = function(e) {
-               showNotification(paste("Could not read file:", e$message),
-                                type = "error")
-               NULL
-             })
+    if (!is.null(input$gene_file)) {
+      return(tryCatch(read_gene_table(input$gene_file$datapath),
+                      error = function(e) {
+                        showNotification(paste("Could not read file:",
+                                               e$message), type = "error")
+                        NULL
+                      }))
+    }
+    store$example  # NULL until the example button is used
   })
 
   # Column pickers (populated from the uploaded file)
@@ -299,27 +401,54 @@ server <- function(input, output, session) {
   output$expr_col_ui <- renderUI({
     df <- gene_table(); req(df, input$gene_col)
     num <- numeric_columns(df, exclude = input$gene_col)
+    # Auto-select a log2FC / expression-looking column so the split and GSEA
+    # modes are offered without the user having to pick it manually.
+    guess <- num[grepl("log.?2?.?fc|logfc|fold|expr", tolower(num))]
+    sel <- if (length(guess)) guess[1] else ""
     selectInput("expr_col", "Expression / log2FC column (optional)",
-                choices = c("None" = "", num), selected = "")
+                choices = c("None" = "", num), selected = sel)
   })
 
-  # Analysis mode: ORA only, unless an expression column is chosen, which also
-  # unlocks split-by-direction and GSEA.
+  # Analysis mode. ORA is always available. Split-by-direction and GSEA need an
+  # expression / log2FC column, so when none is selected they stay visible but
+  # greyed out (rendered as disabled placeholders) rather than disappearing.
   output$mode_ui <- renderUI({
     has_expr <- !is.null(input$expr_col) && nzchar(input$expr_col)
-    choices <- if (has_expr) {
-      c("Over-representation (ORA)" = "ora",
-        "ORA split by direction (up / down)" = "split",
-        "GSEA (ranked list)" = "gsea")
+
+    if (has_expr) {
+      choices <- c("Over-representation (ORA)" = "ora",
+                   "ORA split by direction (up / down)" = "split",
+                   "GSEA (ranked list)" = "gsea")
+      sel <- if (!is.null(input$mode) && input$mode %in% choices) {
+        input$mode
+      } else {
+        "ora"
+      }
+      radioButtons("mode", "Analysis mode", choices = choices, selected = sel)
     } else {
-      c("Over-representation (ORA)" = "ora")
+      # Only ORA is selectable; the other two shown disabled for context.
+      disabled_opt <- function(label) {
+        div(class = "radio mode-disabled",
+            tags$label(
+              tags$input(type = "radio", disabled = NA), " ", tags$span(label)))
+      }
+      tagList(
+        radioButtons("mode", "Analysis mode",
+                     choices = c("Over-representation (ORA)" = "ora"),
+                     selected = "ora"),
+        disabled_opt("ORA split by direction (up / down)"),
+        disabled_opt("GSEA (ranked list)")
+      )
     }
-    sel <- if (!is.null(input$mode) && input$mode %in% choices) {
-      input$mode
-    } else {
-      "ora"
-    }
-    radioButtons("mode", "Analysis mode", choices = choices, selected = sel)
+  })
+
+  output$mode_legend <- renderUI({
+    helpText(
+      "Over-representation (ORA) works on any gene list. ",
+      "Split by direction and GSEA require an expression / log2FC column; ",
+      "GSEA also needs a long, ranked list (ideally most of the genome), ",
+      "so it is best suited to genome-wide results rather than a short hit list."
+    )
   })
 
   # ---- Resolve genes, expression and background -----------------------------
@@ -367,51 +496,72 @@ server <- function(input, output, session) {
         warn)
   })
 
-  # ---- Run enrichment (only the steps that need the test re-run) ------------
-  # The "base" result depends on inputs + min/max size + FDR method. Display
+  # ---- Run enrichment on demand, storing into results() ---------------------
+  # The stored result depends on inputs + min/max size + FDR method. Display
   # filters (cutoff, top_n, redundancy) are applied separately and cheaply.
-  base_result <- eventReactive(input$run, {
-    g <- genes_input()
-    validate(need(length(g) > 0, "Please upload a gene list."))
-    validate(need(length(input$ontologies) > 0,
-                  "Please select at least one GO category."))
+  observeEvent(input$run, {
+    g <- tryCatch(genes_input(), error = function(e) NULL)
+    if (is.null(g) || length(g) == 0) {
+      showNotification("Please provide a gene list first.", type = "error")
+      return()
+    }
+    if (length(input$ontologies) == 0) {
+      showNotification("Please select at least one GO category.", type = "error")
+      return()
+    }
 
     mode <- input$mode %||% "ora"
     bg <- background_input()
 
-    withProgress(message = "Running enrichment...", value = 0.5, {
+    res <- withProgress(message = "Running enrichment...", value = 0.5, {
       if (identical(mode, "gsea")) {
         expr <- expr_input()
-        validate(need(!is.null(expr),
-                      "GSEA needs an expression / log2FC column."))
+        if (is.null(expr)) {
+          showNotification("GSEA needs an expression / log2FC column.",
+                           type = "error")
+          return(NULL)
+        }
         ranked <- stats::setNames(expr, g)
         ranked <- ranked[!is.na(ranked)]
-        res <- run_gsea(ranked, ANNOTATION, ontologies = input$ontologies,
+        if (length(ranked) < GSEA_MIN_RECOMMENDED) {
+          showNotification(
+            sprintf(paste("GSEA works best on a ranked list spanning many",
+                          "genes (ideally most of the genome). You provided",
+                          "%d, so the result may be unreliable. For a short",
+                          "gene list, over-representation analysis (ORA) is the",
+                          "better choice."), length(ranked)),
+            type = "warning", duration = 12)
+        }
+        out <- run_gsea(ranked, ANNOTATION, ontologies = input$ontologies,
                         p_adjust = input$p_adjust, min_size = input$min_size,
                         max_size = input$max_size)
-        list(type = "gsea", data = res)
+        list(type = "gsea", data = out)
       } else if (identical(mode, "split")) {
         expr <- expr_input()
-        validate(need(!is.null(expr),
-                      "Split mode needs an expression / log2FC column."))
-        res <- run_ora_split(g, expr, ANNOTATION,
+        if (is.null(expr)) {
+          showNotification("Split mode needs an expression / log2FC column.",
+                           type = "error")
+          return(NULL)
+        }
+        out <- run_ora_split(g, expr, ANNOTATION,
                              ontologies = input$ontologies, background = bg,
                              p_adjust = input$p_adjust,
                              min_size = input$min_size,
                              max_size = input$max_size)
-        list(type = "split", data = res)
+        list(type = "split", data = out)
       } else {
-        res <- run_ora(g, ANNOTATION, ontologies = input$ontologies,
+        out <- run_ora(g, ANNOTATION, ontologies = input$ontologies,
                        background = bg, p_adjust = input$p_adjust,
                        min_size = input$min_size, max_size = input$max_size)
-        list(type = "ora", data = res)
+        list(type = "ora", data = out)
       }
     })
+    results(res)
   })
 
   # ---- Apply cheap display filters: FDR cutoff + redundancy -----------------
   filtered_result <- reactive({
-    br <- base_result()
+    br <- results(); req(br)
     df <- br$data
     if (nrow(df) == 0) return(br)
 
@@ -426,7 +576,7 @@ server <- function(input, output, session) {
   })
 
   output$has_gsea <- reactive({
-    br <- tryCatch(base_result(), error = function(e) NULL)
+    br <- results()
     !is.null(br) && identical(br$type, "gsea") && nrow(br$data) > 0
   })
   outputOptions(output, "has_gsea", suspendWhenHidden = FALSE)

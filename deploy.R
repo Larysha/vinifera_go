@@ -24,9 +24,11 @@ app_files <- c(
   "guide.md",
   "README.md",
   list.files("R", full.names = TRUE),
+  file.path("www", "favicon.png"),
   file.path("data", c("vitis_v5_term2gene.rds",
                       "vitis_v5_term2name.rds",
-                      "vitis_v5_gene_universe.rds"))
+                      "vitis_v5_gene_universe.rds",
+                      "example_genes.csv"))
 )
 
 rsconnect::deployApp(

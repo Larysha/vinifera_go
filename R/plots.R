@@ -34,10 +34,16 @@ ONTOLOGY_LABELS <- c(
   }, character(1))
 }
 
-#' Keep the top-N most significant terms per ontology
+#' Keep the top-N most significant terms per ontology (and per direction, when
+#' a split-by-direction result is supplied)
 .top_per_ontology <- function(df, top_n) {
-  df <- df[order(df$Ontology, df$p.adjust), , drop = FALSE]
-  do.call(rbind, lapply(split(df, df$Ontology), utils::head, top_n))
+  df <- df[order(df$p.adjust), , drop = FALSE]
+  keys <- if ("Direction" %in% names(df)) {
+    paste(df$Ontology, df$Direction, sep = "|")
+  } else {
+    df$Ontology
+  }
+  do.call(rbind, lapply(split(df, keys), utils::head, top_n))
 }
 
 #' ORA dot plot, faceted by ontology
@@ -50,6 +56,20 @@ go_dotplot <- function(df, top_n = 20) {
   d <- .top_per_ontology(df, top_n)
   d$Description_wrapped <- .wrap_label(d$Description)
   d$OntologyLabel <- ONTOLOGY_LABELS[d$Ontology]
+  split_mode <- "Direction" %in% names(d)
+
+  facet <- if (split_mode) {
+    ggplot2::facet_grid(OntologyLabel ~ Direction, scales = "free_y",
+                        space = "free_y")
+  } else {
+    ggplot2::facet_grid(OntologyLabel ~ ., scales = "free_y",
+                        space = "free_y")
+  }
+  subtitle <- if (split_mode) {
+    "Up- and down-regulated genes analysed separately"
+  } else {
+    NULL
+  }
 
   ggplot2::ggplot(
     d,
@@ -62,10 +82,10 @@ go_dotplot <- function(df, top_n = 20) {
     ggplot2::scale_colour_gradient(low = "#3b5bbf", high = "#d62828",
                                    name = "-log10(FDR)") +
     ggplot2::scale_size_continuous(name = "Gene count", range = c(2.5, 9)) +
-    ggplot2::facet_grid(OntologyLabel ~ ., scales = "free_y",
-                        space = "free_y") +
+    facet +
     ggplot2::labs(x = "Gene ratio", y = NULL,
-                  title = "GO enrichment (over-representation)") +
+                  title = "GO enrichment (over-representation)",
+                  subtitle = subtitle) +
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(
       strip.text = ggplot2::element_text(face = "bold"),
@@ -87,13 +107,17 @@ go_barplot <- function(df, top_n = 20, fdr_cutoff = 0.05) {
   d$label <- paste0("[", d$Ontology, "] ", d$Description)
   d$label <- .wrap_label(d$label, width = 55)
   d <- d[order(d$neglogFDR), , drop = FALSE]
-  d$label <- factor(d$label, levels = d$label)
+  # Labels can repeat across the Up / Down panels, so make them unique per row
+  # while keeping the displayed text via a named factor.
+  d$row_id <- factor(seq_len(nrow(d)), levels = seq_len(nrow(d)))
+  split_mode <- "Direction" %in% names(d)
 
-  ggplot2::ggplot(d, ggplot2::aes(x = .data$neglogFDR, y = .data$label,
-                                  fill = .data$Ontology)) +
+  p <- ggplot2::ggplot(d, ggplot2::aes(x = .data$neglogFDR, y = .data$row_id,
+                                       fill = .data$Ontology)) +
     ggplot2::geom_col(colour = "grey20", width = 0.75) +
     ggplot2::geom_vline(xintercept = -log10(fdr_cutoff),
                         linetype = "dashed", colour = "#dc3030") +
+    ggplot2::scale_y_discrete(labels = stats::setNames(d$label, d$row_id)) +
     ggplot2::scale_fill_manual(values = ONTOLOGY_COLOURS,
                                labels = ONTOLOGY_LABELS, name = "Ontology") +
     ggplot2::labs(x = "-log10(FDR)", y = NULL,
@@ -104,6 +128,13 @@ go_barplot <- function(df, top_n = 20, fdr_cutoff = 0.05) {
       plot.title = ggplot2::element_text(face = "bold"),
       legend.position = "bottom"
     )
+
+  if (split_mode) {
+    p <- p +
+      ggplot2::facet_grid(Direction ~ ., scales = "free_y", space = "free_y") +
+      ggplot2::labs(subtitle = "Up- and down-regulated genes analysed separately")
+  }
+  p
 }
 
 #' GSEA dot plot (NES vs term, sized by set size)

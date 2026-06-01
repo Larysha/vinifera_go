@@ -35,7 +35,8 @@ when the two directions tell different biological stories.
 **GSEA (gene set enrichment analysis)** also uses the expression column, but instead of splitting
 on a threshold it ranks every gene by its value and looks for GO terms whose genes sit
 disproportionately towards the top or bottom of that ranking. It picks up coordinated, subtle
-shifts that a hard cut-off would miss.
+shifts that a hard cut-off would miss. GSEA expects a ranked list spanning many genes, ideally
+most of the genome; for a short list of hits, over-representation analysis is the right choice.
 
 ## Getting started
 
