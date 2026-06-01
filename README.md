@@ -1,4 +1,4 @@
-# vinifera_go
+# <img src="www/favicon.png" alt="vinifera_go logo" height="40" valign="middle"> vinifera_go
 
 A lightweight Shiny app for gene ontology (GO) enrichment analysis on the latest
 telomere-to-telomere *Vitis vinifera* assembly, PN40024 T2T v5.1 (Grapedia
@@ -7,6 +7,8 @@ annotation, gene IDs of the form `Vitvi05_01chr01g00350`).
 It exists because ShinyGO only carries the older 12X / V1 annotation and cannot map
 current T2T v5.1 gene IDs. This app does the equivalent analysis against the current
 assembly, in the browser.
+
+Live app: https://biopod.shinyapps.io/vinifera_go/
 
 
 ## What it does
