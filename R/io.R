@@ -10,20 +10,18 @@
 # assembly prefix so scaffold / unplaced genes still pass.
 VITIS_V5_ID_PATTERN <- "^Vitvi05_01"
 
-#' Read an uploaded gene table
+#' Parse gene-list lines into a data.frame
 #'
-#' Auto-detects the delimiter, skips leading comment lines (starting with #),
-#' and returns a data.frame. A single-column / one-gene-per-line file yields a
-#' one-column frame. Does not assume a header.
+#' Auto-detects the delimiter and returns a data.frame. A single-column /
+#' one-gene-per-line input yields a one-column frame named "gene_id"; delimited
+#' input is assumed to have a header. Comment (#) and blank lines are dropped.
 #'
-#' @param path File path
+#' @param all_lines Character vector of raw lines
 #' @return data.frame with at least one column
-read_gene_table <- function(path) {
-  all_lines <- readLines(path, warn = FALSE)
-  # Drop comment and blank lines
+.parse_gene_lines <- function(all_lines) {
   keep <- !grepl("^\\s*#", all_lines) & nzchar(trimws(all_lines))
   lines <- all_lines[keep]
-  if (length(lines) == 0) stop("The uploaded file contains no data.")
+  if (length(lines) == 0) stop("No genes found in the input.")
 
   # Detect delimiter from the first data line
   first <- lines[1]
@@ -37,15 +35,33 @@ read_gene_table <- function(path) {
 
   txt <- paste(lines, collapse = "\n")
   if (identical(delim, "")) {
-    # One token per line: treat as a single unnamed column
+    # One token per line: a single column. Name it so downstream code and the
+    # column picker behave the same as for an uploaded "gene_id" column.
     df <- utils::read.table(text = txt, header = FALSE,
                             stringsAsFactors = FALSE, fill = TRUE)
+    if (ncol(df) == 1) names(df) <- "gene_id"
   } else {
     df <- utils::read.table(text = txt, header = TRUE, sep = delim,
                             stringsAsFactors = FALSE, fill = TRUE,
                             quote = "\"", check.names = TRUE)
   }
   df
+}
+
+#' Read an uploaded gene table from a file
+#'
+#' @param path File path
+#' @return data.frame with at least one column
+read_gene_table <- function(path) {
+  .parse_gene_lines(readLines(path, warn = FALSE))
+}
+
+#' Read a gene table from pasted text
+#'
+#' @param text A single string (lines separated by newlines)
+#' @return data.frame with at least one column
+read_gene_text <- function(text) {
+  .parse_gene_lines(strsplit(text, "\r?\n")[[1]])
 }
 
 #' Guess which column holds the gene IDs

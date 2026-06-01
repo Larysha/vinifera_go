@@ -84,9 +84,48 @@ Source code and issues: [%s](%s).
 # =============================================================================
 # UI
 # =============================================================================
+
+# Grapevine palette: a burgundy / purple banner with a light-pink highlight.
+GRAPE_BURGUNDY <- "#6d1f44"
+GRAPE_PINK     <- "#f6a8cb"
+
+app_theme <- bs_theme(
+  version = 5,
+  bootswatch = "flatly",
+  primary = GRAPE_BURGUNDY,
+  secondary = "#f6c6da"
+)
+
+# Navbar colours and the pink active / hover highlight (set explicitly so they
+# do not depend on how bootswatch computes navbar contrast).
+app_css <- sprintf("
+  .navbar { background-color: %1$s !important; }
+  .navbar .navbar-brand { color: #ffffff !important; font-weight: 600; }
+  .navbar .nav-link { color: rgba(255, 255, 255, 0.8) !important; }
+  .navbar .nav-link:hover,
+  .navbar .nav-link:focus { color: #ffffff !important; }
+  .navbar .nav-link.active {
+    color: #ffffff !important;
+    border-bottom: 3px solid %2$s;
+  }
+  .nav-tabs .nav-link { color: %1$s !important; }
+  .nav-tabs .nav-link.active {
+    color: %1$s !important;
+    border-bottom: 2px solid %2$s !important;
+    font-weight: 600;
+  }
+  .nav-tabs .nav-link:hover { color: %1$s !important; }
+  a { color: #8a2a57; }
+  .form-control:focus, .form-select:focus {
+    border-color: %2$s;
+    box-shadow: 0 0 0 0.2rem rgba(246, 168, 203, 0.5);
+  }
+", GRAPE_BURGUNDY, GRAPE_PINK)
+
 ui <- page_navbar(
   title = "vinifera_go",
-  theme = bs_theme(version = 5, bootswatch = "flatly"),
+  theme = app_theme,
+  header = tags$head(tags$style(HTML(app_css))),
   fillable = FALSE,
 
   # ---- Analysis (landing page) ----
@@ -101,6 +140,12 @@ ui <- page_navbar(
                   accept = c(".csv", ".tsv", ".txt", ".tab")),
         helpText("One gene per line, or a table with a gene column",
                  "and an optional expression / log2FC column."),
+
+        textAreaInput("gene_paste", "Or paste a gene list",
+                      placeholder = "Vitvi05_01chr01g00350\nVitvi05_01chr01g01160\n...",
+                      rows = 4, resize = "vertical"),
+        helpText("One gene per line. If anything is pasted here it is used",
+                 "in place of an uploaded file."),
 
         uiOutput("gene_col_ui"),
         uiOutput("expr_col_ui"),
@@ -223,8 +268,18 @@ ui <- page_navbar(
 # =============================================================================
 server <- function(input, output, session) {
 
-  # ---- Read the uploaded gene table -----------------------------------------
+  # ---- Read the gene table from pasted text or an uploaded file -------------
+  # Pasted text takes precedence over a file upload.
   gene_table <- reactive({
+    pasted <- input$gene_paste
+    if (!is.null(pasted) && nzchar(trimws(pasted))) {
+      return(tryCatch(read_gene_text(pasted),
+                      error = function(e) {
+                        showNotification(paste("Could not parse pasted genes:",
+                                               e$message), type = "error")
+                        NULL
+                      }))
+    }
     req(input$gene_file)
     tryCatch(read_gene_table(input$gene_file$datapath),
              error = function(e) {
