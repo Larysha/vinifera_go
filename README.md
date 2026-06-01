@@ -6,10 +6,8 @@ annotation, gene IDs of the form `Vitvi05_01chr01g00350`).
 
 It exists because ShinyGO only carries the older 12X / V1 annotation and cannot map
 current T2T v5.1 gene IDs. This app does the equivalent analysis against the current
-assembly, in the browser, so collaborators can run it without writing code.
+assembly, in the browser.
 
-This README is developer documentation. The user-facing landing page is `guide.md`,
-which the app renders on its Home tab.
 
 ## What it does
 
@@ -29,8 +27,7 @@ The GO annotations were downloaded from Grapedia as the
 release and converted to a gene-set (GMT) file. These are orthology-based (blast2go)
 transfers covering roughly 65% of the genome, so not every gene is annotated. The
 default background is every annotated gene; users can upload their own background
-instead, which is recommended when they have a relevant one (for instance the genes
-expressed in their experiment).
+instead.
 
 ## Project layout
 
@@ -126,7 +123,6 @@ rsconnect at the Bioconductor repositories so clusterProfiler resolves on the se
 The bundle is a few MB, well inside the shinyapps.io free-tier limits.
 
 ## Notes
-
-All user-facing text uses South African / British English. The annotation is loaded
+The annotation is loaded
 once at start-up and shared across sessions, so analyses stay fast and memory use
 modest.
