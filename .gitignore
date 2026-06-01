@@ -1,0 +1,20 @@
+# R session / project files
+.Rhistory
+.RData
+.Rapp.history
+.Rproj.user/
+*.Rproj
+
+# Claude Code local settings
+.claude/
+
+# rsconnect deployment records
+rsconnect/
+
+# OS / editor cruft
+.DS_Store
+*~
+*.swp
+
+# logs
+*.log
