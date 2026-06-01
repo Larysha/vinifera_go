@@ -4,6 +4,7 @@
 .Rapp.history
 .Rproj.user/
 *.Rproj
+deployment_notes.md
 
 # Claude Code local settings
 .claude/

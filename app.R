@@ -89,14 +89,7 @@ ui <- page_navbar(
   theme = bs_theme(version = 5, bootswatch = "flatly"),
   fillable = FALSE,
 
-  # ---- Home / user guide ----
-  nav_panel(
-    "Home",
-    div(class = "container", style = "max-width: 860px; padding-top: 1rem;",
-        markdown(guide_md))
-  ),
-
-  # ---- Analysis ----
+  # ---- Analysis (landing page) ----
   nav_panel(
     "Analysis",
     layout_sidebar(
@@ -208,11 +201,20 @@ ui <- page_navbar(
     )
   ),
 
-  # ---- About ----
+  # ---- Docs (user guide + about, appended) ----
   nav_panel(
-    "About",
-    div(class = "container", style = "max-width: 860px; padding-top: 1rem;",
-        markdown(about_md))
+    "Docs",
+    tags$style(HTML("
+      .docs-content { font-size: 0.95rem; }
+      .docs-content h1 { font-size: 1.5rem; margin-top: 1.5rem; }
+      .docs-content h2 { font-size: 1.25rem; margin-top: 1.5rem; }
+      .docs-content h3 { font-size: 1.05rem; margin-top: 1.2rem;
+                         font-weight: 600; }
+      .docs-content h4 { font-size: 0.95rem; font-weight: 600; }
+    ")),
+    div(class = "container docs-content",
+        style = "max-width: 820px; padding-top: 1rem;",
+        markdown(paste(guide_md, about_md, sep = "\n\n")))
   )
 )
 

@@ -82,7 +82,7 @@ aggressive that is: a lower value removes more.
 
 ## What you get out
 
-**Results table. **Every significant term, with its GO ID, name, ontology, gene count, gene and
+**Results table.**Every significant term, with its GO ID, name, ontology, gene count, gene and
 background ratios, raw and adjusted p-values, and the genes driving the enrichment. It is
 sortable, filterable, and downloadable as a CSV.
 
