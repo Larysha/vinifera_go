@@ -19,3 +19,7 @@ rsconnect/
 
 # logs
 *.log
+
+# Protein extraction for eggNOG / KEGG mapping (build-side, not part of the app)
+data-raw/vitis_v5_proteins.faa
+data-raw/extract_proteins.py

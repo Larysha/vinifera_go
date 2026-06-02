@@ -19,6 +19,32 @@ suppressPackageStartupMessages({
 # Null-coalescing helper (used throughout the server)
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+# Select + rename result columns for display / download. Shared by the on-screen
+# table and both CSV downloads so the filtered and full exports look identical.
+format_result_table <- function(df, type) {
+  if (is.null(df) || nrow(df) == 0) return(df)
+
+  if (type == "gsea") {
+    cols <- c("ID", "Description", "Ontology", "setSize", "NES",
+              "enrichmentScore", "pvalue", "p.adjust", "core_enrichment")
+    df <- df[, intersect(cols, names(df)), drop = FALSE]
+    names(df) <- c("GO ID", "Term", "Ontology", "Set size", "NES",
+                   "Enrichment score", "p-value", "Adjusted p",
+                   "Core genes")[seq_along(names(df))]
+  } else {
+    keep <- c("ID", "Description", "Ontology",
+              if ("Direction" %in% names(df)) "Direction",
+              "Count", "GeneRatio", "BgRatio", "pvalue", "p.adjust", "geneID")
+    df <- df[, intersect(keep, names(df)), drop = FALSE]
+    nice <- c(ID = "GO ID", Description = "Term", Ontology = "Ontology",
+              Direction = "Direction", Count = "Gene count",
+              GeneRatio = "Gene ratio", BgRatio = "Bg ratio",
+              pvalue = "p-value", p.adjust = "Adjusted p", geneID = "Genes")
+    names(df) <- nice[names(df)]
+  }
+  df
+}
+
 # Source helpers explicitly (also auto-sourced by Shiny, but this keeps the app
 # runnable from any working directory / via testthat).
 for (f in c("annotation.R", "io.R", "enrichment.R", "plots.R")) {
@@ -295,8 +321,15 @@ ui <- page_navbar(
       card(
         card_header("Downloads"),
         layout_columns(
-          col_widths = c(3, 3, 3, 3),
-          downloadButton("dl_csv", "Results (CSV)"),
+          col_widths = c(6, 6),
+          downloadButton("dl_csv", "Significant results (CSV)"),
+          downloadButton("dl_csv_all", "All results, unfiltered (CSV)")
+        ),
+        helpText("\"Significant results\" matches the table above (FDR cutoff",
+                 "and redundancy filter applied). \"All results\" includes every",
+                 "tested GO term with its p-value, even non-significant ones."),
+        layout_columns(
+          col_widths = c(4, 4, 4),
           downloadButton("dl_dot_png", "Dot plot (PNG)"),
           downloadButton("dl_dot_pdf", "Dot plot (PDF)"),
           downloadButton("dl_bar_pdf", "Bar plot (PDF)")
@@ -582,30 +615,17 @@ server <- function(input, output, session) {
   outputOptions(output, "has_gsea", suspendWhenHidden = FALSE)
 
   # ---- Results table --------------------------------------------------------
+  # Displayed table: respects the FDR cutoff and redundancy filter.
   table_data <- reactive({
     res <- filtered_result()
-    df <- res$data
-    if (nrow(df) == 0) return(df)
+    format_result_table(res$data, res$type)
+  })
 
-    if (res$type == "gsea") {
-      cols <- c("ID", "Description", "Ontology", "setSize", "NES",
-                "enrichmentScore", "pvalue", "p.adjust", "core_enrichment")
-      df <- df[, intersect(cols, names(df)), drop = FALSE]
-      names(df) <- c("GO ID", "Term", "Ontology", "Set size", "NES",
-                     "Enrichment score", "p-value", "Adjusted p",
-                     "Core genes")[seq_along(names(df))]
-    } else {
-      keep <- c("ID", "Description", "Ontology",
-                if ("Direction" %in% names(df)) "Direction",
-                "Count", "GeneRatio", "BgRatio", "pvalue", "p.adjust", "geneID")
-      df <- df[, intersect(keep, names(df)), drop = FALSE]
-      nice <- c(ID = "GO ID", Description = "Term", Ontology = "Ontology",
-                Direction = "Direction", Count = "Gene count",
-                GeneRatio = "Gene ratio", BgRatio = "Bg ratio",
-                pvalue = "p-value", p.adjust = "Adjusted p", geneID = "Genes")
-      names(df) <- nice[names(df)]
-    }
-    df
+  # Every tested term, ignoring the display filters (FDR cutoff, redundancy).
+  # Used by the "All results" download so non-significant terms are included.
+  full_table_data <- reactive({
+    br <- results(); req(br)
+    format_result_table(br$data, br$type)
   })
 
   output$results_table <- DT::renderDT({
@@ -676,12 +696,24 @@ server <- function(input, output, session) {
   })
 
   # ---- Downloads ------------------------------------------------------------
+  # Significant terms only (what the table currently shows).
   output$dl_csv <- downloadHandler(
     filename = function() {
       paste0("vinifera_go_results_", Sys.Date(), ".csv")
     },
     content = function(file) {
       utils::write.csv(table_data(), file, row.names = FALSE)
+    }
+  )
+
+  # Every tested term, including non-significant ones (no FDR / redundancy
+  # filtering). The full set so users can see weakly-enriched terms too.
+  output$dl_csv_all <- downloadHandler(
+    filename = function() {
+      paste0("vinifera_go_results_all_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      utils::write.csv(full_table_data(), file, row.names = FALSE)
     }
   )
 
