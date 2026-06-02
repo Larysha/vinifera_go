@@ -113,10 +113,8 @@ to a gene-set (GMT) file. Roughly 65%% genome coverage.
 Enrichment is performed with the clusterProfiler R package (Wu et al., 2021,
 *The Innovation*), using enricher() for over-representation and GSEA() for gene
 set enrichment. Plots use ggplot2 and enrichplot.
-
-Source code and issues: [%s](%s).
 ',
-  GENOME_LABEL, GENOME_LABEL, GMT_SOURCE_URL, SOURCE_CODE_URL, SOURCE_CODE_URL)
+  GENOME_LABEL, GENOME_LABEL, GMT_SOURCE_URL)
 
 # =============================================================================
 # UI
